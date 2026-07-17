@@ -11,43 +11,54 @@ app.get('/', (req, res) => {
 });
 
 app.get('/watch/:id', async (req, res) => {
+    const tmdbId = req.params.id;
+    const embedUrl = `https://vidsrc.to/embed/movie/${tmdbId}`;
+
     try {
-        const tmdbId = req.params.id;
-
-        // 1. الرابط الأساسي لـ VidSrc
-        const embedUrl = `https://vidsrc.to/embed/movie/${tmdbId}`;
-
-        // 2. جلب صفحة الـ Embed وتحليلها لاستخراج الـ Media Sources
-        // ملحوظة: VidSrc بتعتمد على طلبات داخلية لجلب السيرفرات (مثل vidsrc.stream أو pro)
-        // بنعمل طلب للـ API الوسيط المفتوح المصدر المخصص لفك تشفير حماية vidsrc المباشرة
         const resolverUrl = `https://vidsrc-api-eta.vercel.app/api/source/${tmdbId}`; 
         
-        const response = await fetch(resolverUrl);
-        const data = await response.json();
+        // حطينا وقت أقصى للاستجابة (Timeout) عشان السيرفر ميتعلقش لو الموقع التاني مهنج
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 5000); // 5 ثواني
 
-        // لو نجح الـ Scraping وفك التشفير وجاب روابط البث المباشرة (HLS)
-        if (data && data.stream_url) {
-            return res.json({
-                success: true,
-                provider: "vidsrc_native",
-                embed_url: embedUrl,
-                stream_url: data.stream_url, // الرابط الخام اللي أوله https وآخره .m3u8
-                subtitles: data.subtitles || [], // الترجمات لو متوفرة
-                message: "Native stream loaded successfully"
-            });
+        const response = await fetch(resolverUrl, { signal: controller.signal });
+        clearTimeout(timeout);
+
+        // التأكد إن الرد سليم وجاي بصيغة JSON فعلياً مش كتابة أو صفحة إيرور
+        const contentType = response.headers.get("content-type");
+        if (response.ok && contentType && contentType.includes("application/json")) {
+            const data = await response.json();
+
+            if (data && data.stream_url) {
+                return res.json({
+                    success: true,
+                    provider: "vidsrc_native",
+                    embed_url: embedUrl,
+                    stream_url: data.stream_url,
+                    subtitles: data.subtitles || [],
+                    message: "Native stream loaded successfully"
+                });
+            }
         }
 
-        // حل احتياطي (Fallback): لو الـ Scraper معرفش يفك التشفير لأي سبب، هيرجع الـ embed_url القديم
-        res.json({
+        // لو السيرفر التاني رجع إيرور أو مش JSON، بندخل هنا فوراً بدون ما السيرفر ينهار
+        return res.json({
             success: true,
             provider: "fallback_embed",
             embed_url: embedUrl,
             stream_url: null,
-            message: "Direct stream failed, falling back to embed URL"
+            message: "Direct stream currently unavailable, falling back to embed URL"
         });
 
     } catch (error) {
-        res.status(500).json({ error: error.message });
+        // حماية قصوى: لو حصل أي إيرور مفاجئ في الـ Fetch، ارجع للرابط الاحتياطي برضه
+        return res.json({
+            success: true,
+            provider: "fallback_embed",
+            embed_url: embedUrl,
+            stream_url: null,
+            message: `Scraper error: ${error.message}. Using fallback embed URL.`
+        });
     }
 });
 
