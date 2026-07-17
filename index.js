@@ -1,24 +1,31 @@
 import express from 'express';
 import cors from 'cors';
-import { MOVIES } from '@consumet/extensions';
+import fetch from 'node-fetch'; // أو استخدام fetch المدمج في Node 18+
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-const vidsrc = new MOVIES.VidSrc();
-
 app.get('/', (req, res) => {
-    res.json({ message: "Aura API Bridge on Vercel is Working!" });
+    res.json({ status: "Aura Stable Bridge is Online" });
 });
 
 app.get('/watch/:id', async (req, res) => {
     try {
-        const movieId = req.params.id;
-        const watchData = await vidsrc.fetchMediaSources(movieId);
-        res.json(watchData);
+        const tmdbId = req.params.id;
+
+
+        const targetUrl = `https://vidsrc.to/embed/movie/${tmdbId}`;
+
+        res.json({
+            success: true,
+            embed_url: targetUrl,
+            message: "Use this in your media pipeline"
+        });
+
     } catch (error) {
         res.status(500).json({ error: error.message });
     }
 });
+
 export default app;
