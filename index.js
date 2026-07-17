@@ -1,13 +1,9 @@
 import express from 'express';
 import cors from 'cors';
-import { MOVIES } from '@consumet/extensions';
 
 const app = express();
 app.use(cors());
 app.use(express.json());
-
-// تشغيل ملقط الأفلام من مكتبة Consumet
-const vidsrc = new MOVIES.VidSrcTo();
 
 app.get('/', (req, res) => {
     res.json({ status: "Aura Stable Bridge is Online" });
@@ -18,40 +14,47 @@ app.get('/watch/:id', async (req, res) => {
     const embedUrl = `https://vidsrc.to/embed/movie/${tmdbId}`;
 
     try {
-        // المكتبة بتدخل تفك التشفير داخلياً وتجيب السيرفرات المباشرة
-        const movieSources = await vidsrc.fetchEpisodeSources(tmdbId);
+        // استخدام بروفايدر فك تشفير سريع ومباشر وخفيف جداً
+        const resUrl = `https://api.vidsrc.cc/v1/embed/movie/${tmdbId}`;
+        
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 4000); // 4 ثواني بالظبط عشان نلحق الـ Vercel limit
 
-        // تصفية الروابط لـ جلب رابط البث المباشر (.m3u8) عالي الجودة
-        if (movieSources && movieSources.sources && movieSources.sources.length > 0) {
-            // غالباً أول سيرفر هو الأساسي والأعلى جودة
-            const primarySource = movieSources.sources[0]; 
+        const response = await fetch(resUrl, { signal: controller.signal });
+        clearTimeout(timeout);
 
-            return res.json({
-                success: true,
-                provider: "vidsrc_consumet_native",
-                embed_url: embedUrl,
-                stream_url: primarySource.url, // الرابط الخام الناتيڤ (.m3u8)
-                subtitles: movieSources.subtitles || [],
-                message: "Native stream extracted successfully by Aura Bridge"
-            });
+        if (response.ok) {
+            const data = await response.json();
+            // لو رجع رابط البث المباشر بنجاح
+            if (data && data.stream_url) {
+                return res.json({
+                    success: true,
+                    provider: "vidsrc_cc_native",
+                    embed_url: embedUrl,
+                    stream_url: data.stream_url,
+                    subtitles: data.subtitles || [],
+                    message: "Native stream loaded successfully"
+                });
+            }
         }
 
-        // Fallback لو المكتبة معرفتش تلقط اللينك في ثواني
+        // الـ Fallback السريع لو السيرفر اتأخر أو رجع داتا مش كاملة
         return res.json({
             success: true,
             provider: "fallback_embed",
             embed_url: embedUrl,
             stream_url: null,
-            message: "Direct stream currently unavailable, falling back to embed"
+            message: "Direct stream link skipped, using fallback embed URL safely"
         });
 
     } catch (error) {
+        // حماية تامة ضد الـ Function Invocation Failed
         return res.json({
             success: true,
             provider: "fallback_embed",
             embed_url: embedUrl,
             stream_url: null,
-            message: `Extraction error: ${error.message}. Using fallback.`
+            message: "Using fallback embed URL due to execution timeout"
         });
     }
 });
